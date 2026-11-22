@@ -1,9 +1,12 @@
 import http from 'node:http';
 import { verifySignature } from './verify.js';
 import { InMemoryStore } from './store.js';
+import { withRetry } from './retry.js';
+import { DeadLetterQueue } from './dlq.js';
 
-export function createServer({ secret }) {
+export function createServer({ secret, processEvent = async () => {} }) {
   const store = new InMemoryStore();
+  const dlq = new DeadLetterQueue();
 
   const server = http.createServer(async (req, res) => {
     if (req.method !== 'POST' || !req.url.startsWith('/webhooks/')) {
@@ -38,10 +41,25 @@ export function createServer({ secret }) {
     }
 
     const result = store.add(payload.id, payload);
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ received: true, duplicate: result.duplicate }));
+
+    if (result.duplicate) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ received: true, duplicate: true }));
+      return;
+    }
+
+    try {
+      await withRetry(() => processEvent(payload), { attempts: 3, baseDelayMs: 10 });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ received: true, duplicate: false }));
+    } catch (error) {
+      dlq.add(payload, error);
+      res.writeHead(202, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ received: true, duplicate: false, queued: true }));
+    }
   });
 
   server.store = store;
+  server.dlq = dlq;
   return server;
 }
