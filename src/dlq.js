@@ -15,6 +15,21 @@ export class DeadLetterQueue {
     });
   }
 
+  async replay(handler) {
+    const remaining = [];
+
+    for (const item of this.items) {
+      try {
+        await handler(item.event);
+      } catch {
+        remaining.push(item);
+      }
+    }
+
+    this.items = remaining;
+    return this.items.length;
+  }
+
   list() {
     return [...this.items];
   }
