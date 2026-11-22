@@ -7,11 +7,7 @@ export class InMemoryStore {
     return this.events.size;
   }
 
-   add(id, payload) {
-    if (this.events.has(id)) {
-      return { duplicate: true, event: this.events.get(id) };
-    }
-
+  add(id, payload) {
     this.events.set(id, payload);
     return { duplicate: false, event: payload };
   }
