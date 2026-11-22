@@ -1,13 +1,23 @@
 # integration-reliability-lab
 
-A small webhook receiver that validates the signature and processes each event once.
+A small webhook receiver that validates the signature, processes each event once, and does not lose the event when the downstream call fails.
 
 ## What it does
 
 - `POST /webhooks/:source` receives a JSON event.
-- It checks `x-signature`, an HMAC SHA256 of the raw body using `WEBHOOK_SECRET`.
-- It stores the event by `id` and ignores duplicates.
-- It returns `401` when the signature is wrong.
+- Checks `x-signature`, an HMAC SHA256 of the raw body using `WEBHOOK_SECRET`.
+- Stores the event by `id` and ignores duplicates.
+- Processes the event with up to 3 attempts and exponential backoff.
+- Sends the event to a dead-letter queue when all attempts fail.
+
+## Responses
+
+| Status | When |
+|---|---|
+| 200 | Signature valid, event processed or already seen |
+| 202 | Signature valid, processing failed, event queued in the DLQ |
+| 400 | Invalid JSON or missing `id` |
+| 401 | Missing or invalid signature |
 
 ## Run the tests
 
@@ -15,18 +25,16 @@ A small webhook receiver that validates the signature and processes each event o
 node --test
 ```
 
-The three tests start red. The goal is to implement three functions until they pass:
+16 tests: signature, store, retry, DLQ and the HTTP flow.
 
-1. `verifySignature` in `src/verify.js`.
-2. `InMemoryStore.add` in `src/store.js`.
-3. `createServer` in `src/server.js`.
+## Design notes
 
-## Why this exists
-
-Webhooks fail in silence. This lab is the smallest piece of the reliability work: prove the caller is who they say they are, and never process the same event twice.
+- The signature is checked against the raw body, before `JSON.parse`.
+- The store marks the event before processing. A provider retry after a failure is treated as a duplicate, so the recovery path is the DLQ replay, not another webhook.
+- `baseDelayMs` is small in tests and should be larger in production.
 
 ## Next steps
 
-- Add retries with exponential backoff.
-- Add a dead-letter queue and a replay command.
+- Add a replay command for the DLQ.
+- Replace the in-memory store with PostgreSQL.
 - Add structured logs and tracing.
