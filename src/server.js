@@ -9,6 +9,13 @@ export function createServer({ secret, processEvent = async () => {} }) {
   const dlq = new DeadLetterQueue();
 
   const server = http.createServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/dlq/replay') {
+      const remaining = await dlq.replay(processEvent);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ replayed: true, remaining }));
+      return;
+    }
+
     if (req.method !== 'POST' || !req.url.startsWith('/webhooks/')) {
       res.writeHead(404).end();
       return;
